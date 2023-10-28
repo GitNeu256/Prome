@@ -1,2 +1,2 @@
 # Prome
-NN on base transformer architecture 
+Prome or Prome LM it me neural network based on Transformer architecture, similar to GPT model.
