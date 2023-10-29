@@ -7,7 +7,19 @@ from torch import Tensor
 import numpy as np
 
 class PromeLayerNorm(nn.Module):
-    def __init__(self, input_size, gamma, beta, epsilon):
+    """
+    This class implements a Prome layer normalization layer.
+
+    This layer normalizes the input activations based on the mean and standard deviation of the activations along a given dimension.
+
+    Args:
+        input_size (int): The size of the input dimension.
+        epsilon (float): A small value to avoid division by zero.
+
+    Returns:
+        torch.Tensor: A tensor of the same shape as the input tensor.
+    """
+    def __init__(self, input_size, epsilon):
         super(PromeLayerNorm, self).__init__()
         self.input_size = input_size
         self.gamma = torch.nn.Parameter(torch.ones(input_size))
@@ -15,6 +27,15 @@ class PromeLayerNorm(nn.Module):
         self.epsilon = epsilon
 
     def forward(self, x):
+        """
+        Computes the layer normalization of the input tensor.
+
+        Args:
+            x (torch.Tensor): A tensor of shape (batch_size, sequence_length, input_size).
+
+        Returns:
+            torch.Tensor: A tensor of the same shape as the input tensor.
+        """
         # Compute the mean and standard deviation of the input.
         mean = x.mean(dim=-1, keepdim=True)
         std = x.std(dim=-1, keepdim=True)
@@ -26,6 +47,17 @@ class PromeLayerNorm(nn.Module):
         return self.gamma * x_norm + self.beta
 
 class PromeEmbedding(nn.Module):
+    """
+    This class implements a Prome embedding layer.
+
+    Args:
+        vocab_size (int): The size of the vocabulary.
+        embedding_dim (int): The dimension of the embedding.
+        padding_idx (int, optional): The padding index. If this is not None, then the padding index will be masked out when calculating the embedding.
+
+    Returns:
+        torch.Tensor: A tensor of shape (batch_size, sequence_length, embedding_dim).
+    """
     def __init__(self, vocab_size, embedding_dim, padding_idx = None):
         super().__init__()
         self.embedding_dim = embedding_dim
@@ -33,11 +65,20 @@ class PromeEmbedding(nn.Module):
         self.padding_idx = padding_idx
 
     def forward(self, input_ids):
+        """
+        Calculates the embedding for the given input IDs.
+
+        Args:
+            input_ids (torch.Tensor): A tensor of shape (batch_size, sequence_length).
+
+        Returns:
+            torch.Tensor: A tensor of shape (batch_size, sequence_length, embedding_dim).
+        """
         input_ids = input_ids.long()
         if self.padding_idx is not None:
             input_ids = input_ids.masked_fill(input_ids == self.padding_idx, 0)
 
-        # Получение векторов символов
+        # get symbol vector
         output = self.weight[input_ids]
 
         return output
@@ -109,7 +150,7 @@ class MultiHeadAttention(nn.Module):
 
 class FeedForward(nn.Module):
     """
-    A simple linear layer followed by ReLu and GeLu
+    A simple linear layer followed by GeLu
     """
 
     def __init__(self, num_embed, dropout):
@@ -143,8 +184,8 @@ class TransformerBlock(nn.Module):
         )
         self.ffwd = FeedForward(num_embed=num_embed, dropout=dropout)
         # add the layer normalization
-        self.ln1 = PromeLayerNorm(num_embed, 1, 0, EPS)
-        self.ln2 = PromeLayerNorm(num_embed, 1, 0, EPS)
+        self.ln1 = PromeLayerNorm(num_embed, EPS)
+        self.ln2 = PromeLayerNorm(num_embed, EPS)
 
     def forward(self, x):
         # "x +" is the skip (or residual) connection
@@ -154,12 +195,27 @@ class TransformerBlock(nn.Module):
         x = x + self.sa(self.ln1(x))
         x = x + self.ffwd(self.ln2(x))
         return x
+    
+class TransformerEncoder(nn.Module):
+    """
+    This class implements a Transformer encoder.
 
-class TransformerDecoder(nn.Module):
+    Args:
+        num_heads (int): The number of attention heads.
+        block_size (int): The size of the input sequence.
+        num_embed (int): The dimension of the embedding.
+        num_layers (int): The number of encoder blocks.
+        dropout (float): The dropout rate.
+
+    Returns:
+        torch.Tensor: A tensor of shape (batch_size, sequence_length, embedding_dim).
+    """
     def __init__(self, num_heads, block_size, num_embed, num_layers, dropout):
         super().__init__()
+        # Create the embedding layer.
         self.pemb = PromeEmbedding(block_size, num_embed)
 
+        # Create a sequential block of Transformer blocks.
         self.blocks = nn.Sequential(
             *[
                 TransformerBlock(
@@ -172,14 +228,97 @@ class TransformerDecoder(nn.Module):
             ]
         )
 
+    def forward(self, x):
+        """
+        Encodes the input sequence.
+
+        Args:
+            x (torch.Tensor): A tensor of shape (batch_size, sequence_length).
+
+        Returns:
+            torch.Tensor: A tensor of shape (batch_size, sequence_length, embedding_dim).
+        """
+
+        # Pass the embedded input sequence through the sequential block of Transformer blocks.
+        for block in self.blocks:
+            x = block(x)
+
+        return x
+
+class TransformerDecoder(nn.Module):
+    """
+    This class implements a Transformer decoder.
+
+    Args:
+        num_heads (int): The number of attention heads.
+        block_size (int): The size of the input sequence.
+        num_embed (int): The dimension of the embedding.
+        num_layers (int): The number of decoder blocks.
+        dropout (float): The dropout rate.
+
+    Returns:
+        torch.Tensor: A tensor of shape (batch_size, sequence_length, embedding_dim).
+    """
+    def __init__(self, num_heads, block_size, num_embed, num_layers, dropout):
+        super().__init__()
+
+        # Create the embedding layer.
+        self.pemb = PromeEmbedding(block_size, num_embed)
+
+        # Create a sequential block of Transformer blocks.
+        self.blocks = nn.Sequential(
+            *[
+                TransformerBlock(
+                    num_heads=num_heads,
+                    block_size=block_size,
+                    num_embed=num_embed,
+                    dropout=dropout,
+                )
+                for _ in range(num_layers)
+            ]
+        )
+
+        # Create the encoder.
+        self.encoder = TransformerEncoder(num_heads, block_size, num_embed, num_layers, dropout)
+
+        # Create a list of residual connections.
         self.residuals = nn.ModuleList([nn.Identity() for _ in range(num_layers)])
 
+        # Create a layer normalization layer.
+        self.norm = PromeLayerNorm(num_embed, EPS)
+        # Create a dropout layer.
+        self.dropout = nn.Dropout(dropout)
+        # Create a softmax layer.
+        self.softmax = nn.Softmax(dim=-1)
+
     def forward(self, x):
+        """
+        Decodes the input sequence.
+
+        Args:
+            x (torch.Tensor): A tensor of shape (batch_size, sequence_length).
+
+        Returns:
+            torch.Tensor: A tensor of shape (batch_size, sequence_length, embedding_dim).
+        """
+
+        # Encode the input sequence.
+        output_encoder = self.encoder(x)
+
+        # Add positional encodings to the input sequence.
         x = x + self.pemb(torch.arange(x.size(1)))
 
+        # Pass the input sequence through the sequential block of Transformer blocks, with residual connections and layer normalization.
         for block, residual in zip(self.blocks, self.residuals):
             x = block(x)
             x = x + residual(x)
+            x = x + output_encoder
+            x = self.norm(x)
+            x = self.dropout(x)
+
+        # Apply a softmax layer to the output of the last Transformer block.
+        x = self.softmax(x)
+
         return x
     
 class Transformer(nn.Module):
@@ -202,7 +341,7 @@ class Transformer(nn.Module):
         self.decoder = TransformerDecoder(self.num_heads, self.block_size, self.num_embed, self.num_layers, self.dropout)
 
         # we add the layer norm before the Linear layer
-        self.ln_f = PromeLayerNorm(self.num_embed, 1, 0, EPS)
+        self.ln_f = PromeLayerNorm(self.num_embed, EPS)
         self.lm_head = nn.Linear(self.num_embed, self.vocab_size)
 
     def forward(self, idx, targets=None):

@@ -33,11 +33,15 @@ from utils import (
 # raw data
 data_raw_mass = []
 pre_val_data_mass = []
-path_do_data = "data/english"
-for file in os.listdir(path_do_data):
-    data_raw = open(f"{path_do_data}/{file}", encoding="utf-8").read()
-    data_raw_mass.append(data_raw[:int(0.8 * len(data_raw))])
-    pre_val_data_mass.append(data_raw[int(0.8 * len(data_raw)):])
+path_do_data_train = "data/english/train_data"
+path_do_data_val = "data/english/val_data"
+for file in os.listdir(path_do_data_train):
+    data_raw = open(f"{path_do_data_train}/{file}", encoding="utf-8").read()
+    data_raw_mass.append(data_raw)
+
+for file in os.listdir(path_do_data_val):
+    pre_val_data = open(f"{path_do_data_val}/{file}", encoding="utf-8").read()
+    pre_val_data_mass.append(pre_val_data)
 
 data_raw = "\n".join(data_raw_mass)
 pre_val_data = "\n".join(pre_val_data_mass)
@@ -77,8 +81,6 @@ print(
 # and updates the parameters during the training process in order to
 # minimize the loss function.
 optimizer = torch.optim.AdamW(m.parameters(), lr=LEARNING_RATE, eps = EPS)
-
-best_loss = 10000
 
 for step in range(MAX_ITER):
     # every EVAL_INTER evaluate the loss on train and val sets
